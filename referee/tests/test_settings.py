@@ -2,6 +2,7 @@
 import os
 
 DEBUG = True
+USE_TZ = True
 
 SITE_ID = 1
 
