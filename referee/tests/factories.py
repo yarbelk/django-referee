@@ -1,9 +1,11 @@
 from datetime import datetime
 
 from django.utils import timezone
-import factory
 
-from test_app.models import TimePeriod
+import factory
+from django_libs.tests.factories import UserFactory
+
+from ..models import TimePeriod, Participant, TimePeriodPrizeAvailable, Prize
 
 
 class TimePeriodFactory(factory.DjangoModelFactory):
@@ -22,3 +24,31 @@ class TimePeriodFactory(factory.DjangoModelFactory):
         datetime(2013, 5, 26, 23, 59, 59, tzinfo=timezone.utc),
         datetime(2013, 6, 2, 23, 59, 59, tzinfo=timezone.utc),
     ))
+
+
+class ParticipantFactory(factory.DjangoModelFactory):
+    FACTORY_FOR = Participant
+    user = factory.SubFactory(UserFactory)
+
+
+class PrizeFactory(factory.DjangoModelFactory):
+    FACTORY_FOR = Prize
+
+    total_units = 3
+    description = factory.Sequence(lambda n: 'Prize {0}'.format(n))
+
+    @factory.post_generation
+    def time_periods(self, create, extracted, **kwargs):
+        if extracted:
+            try:
+                for period in extracted:
+                    TimePeriodPrizeAvailable.objects.create(time_period=period,
+                                                            prize=self)
+            except TypeError:
+                TimePeriodPrizeAvailable.objects.create(time_period=extracted,
+                                                        prize=self)
+        else:
+            TimePeriodPrizeAvailable.objects.create(
+                time_period=TimePeriodFactory.create(),
+                prize=self
+            )
