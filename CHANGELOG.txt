@@ -1,2 +1,5 @@
-=== (ongoing) ===
-- Initial commit
+2013-07-23  Björn Andersson  <ba@sanitarium.se>
+
+	* models.py (TimePeriod): added a model for non-overlapping time
+	periods. A basic piece that will be used by most of the comming
+	models.
