@@ -1,11 +1,24 @@
 from __future__ import unicode_literals
 
+import logging
+
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
 from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
 
+try:
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+except ImportError:
+    from django.contrib.auth.models import User
+
+from datetime_truncate import truncate_day
+
 from .managers import CurrentTimePeriodManager, CurrentAndPastTimePeriodManager
+
+
+logger = logging.getLogger('referee')
 
 
 class TimePeriod(models.Model):
@@ -71,7 +84,7 @@ class TimePeriod(models.Model):
         return cls.objects.filter(period_start__lt=current)
 
 
-class Participant(models.Model):
+class BasicParticipant(models.Model):
     '''This model sliced out of a daily lucky wheel app.
 
     Reusable model usage to look something like:
@@ -88,27 +101,23 @@ class Participant(models.Model):
 
     A participant is used together with a time period on a Prize to be claimed.
     '''
-    class NoMoreChances(IntegrityError): pass
-
-    user = models.OneToOneField('auth.User', related_name="+")
-    finish_quiz = models.BooleanField(default=False)
-    spin_times = models.PositiveIntegerField(default=1)
-    last_spin = models.DateTimeField(null=True, blank=True)
-    extra_spins_received = models.PositiveIntegerField(default=0)
-
+    user = models.OneToOneField(User, related_name="+")
     full_name = models.CharField(max_length=60)
-    nric = models.CharField(max_length=20)
     phone = models.CharField(max_length=20)
     email = models.EmailField(max_length=50)
 
+    class Meta:
+        abstract = True
+
     @property
     def has_personal_particulars(self):
-        return (len(self.full_name) and len(self.nric)
-                and len(self.phone) and len(self.email))
+        '''Has the user entered all the personal particulars required?'''
+        return bool(len(self.full_name) and len(self.phone)
+                    and len(self.email))
 
     def set_particulars(self, data):
         changed = False
-        for attr in ('full_name', 'nric', 'phone', 'email'):
+        for attr in ('full_name', 'phone', 'email'):
             val = data.get(attr)
             if val and getattr(self, attr) != val:
                 setattr(self, attr, val)
@@ -118,45 +127,129 @@ class Participant(models.Model):
 
         return self
 
-    @property
-    def can_spin(self):
-        return not (self.spin_times <= 0
-                    and (self.last_spin
-                         and self.last_spin.date() == timezone.now().date()))
-
-    def spin(self):
-        if not self.can_spin:
-            raise self.NoMoreSpins()
-        elif self.spin_times > 0:
-            self.spin_times -= 1
-
-        # Urk logic
-        if self.spin_times == 0:
-            self.last_spin = timezone.now()
-
-        self.save()
-
-    def friend_accepted_invitation(self):
-        self.spin_times += 1
-        self.extra_spins_received += 1
-        self.save()
-
-    @property
-    def friends_accepted_invitations(self):
-        fb_user = self.user.get_profile().facebook
-        return (FacebookInvitation.objects
-                .filter(sender=fb_user)
-                .exclude(accepted=None))
-
     def __unicode__(self):
-        fb_user = self.user.get_profile().facebook
-        if fb_user:
-            return fb_user.full_name()
+        self.full_name
+
+
+class LimitedParticipation(models.Model):
+    '''Sometimes a competition/giveaway only allows a user to enter X
+    amounts of times. Or to claim Y amount of prizes. Or maybe they can
+    enter once a day.
+    '''
+    class NoMoreChances(IntegrityError):
+        '''Raised when the limited amount has run out for the user. Does not
+        necessarily mean the user can't _ever_ enter again.
+        '''
+
+    finish_quiz = models.BooleanField(default=False)
+    chances = models.PositiveIntegerField(
+        default=1,
+        help_text=_('The amount of times the user currently can participate')
+    )
+    last_chance_used_at = models.DateTimeField(null=True, blank=True)
+    extra_chances_received = models.PositiveIntegerField(
+        default=0,
+        help_text=_('If the user has received extra chances for any reason. '
+                    'Just informative.'),
+        editable=False,
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def has_chances(self):
+        return self.chances > 0
+
+    def use_chance(self, commit=True):
+        if not self.has_chances:
+            raise self.NoMoreChances()
+        elif self.chance > 0:
+            self.chances -= 1
         else:
-            return 'N/A'
+            msg = '`has_chances` is true but chance is not > 0'
+            logger.error(msg, extra={
+                'has_chances': self.has_chances,
+                'chances': self.chances,
+            })
+            raise ValueError(msg)
+
+        self._set_last_chance_used()
+
+        if commit:
+            self.save()
+
+    def _set_last_chance_used(self):
+        '''So that this can be used for changing the way extra chances are
+        given based on the time. If the user receives a new chance
+        every 5 minutes and more than 5 minutes has past since the
+        very last chance was used, then give the user a new chance.
+        '''
+        self.last_chance_used_at = timezone.now()
+
+    def receive_extra_chance(self, commit=True):
+        self.chances += 1
+        self.extra_chances_received += 1
+        self.extra_chance_received_hook()
+
+        if commit:
+            self.save()
+
+    def extra_chance_received_hook(self):
+        '''If any extra logic should be performed when an extra chance has
+        been received then add it here. Will be run before the model is
+        saved.
+        '''
 
 
-class Prize(models.Model):
+class ExtraChanceDaily(LimitedParticipation):
+    '''Allows the particpant to receive an extra chance at the stroke of
+    midnight for every day past the first day.
+
+    One assumption is that the very first chance will be received from
+    the participant, and as such an empty `last_chance_used_at` will
+    not receive an extra chance.
+
+    Any extra chances received from time bonuses will not be
+    registered in `extra_chances_received`.
+
+    To set it to receive one extra chance more often override
+    `_last_new_period` and every time `last_chance_used_at` is before
+    that timestamp a new chance will be awarded.
+
+    '''
+    class Meta:
+        abstract = True
+
+    @property
+    def has_chances(self):
+        return self.chances > 0 or self.extra_chance_from_time
+
+    @property
+    def extra_chance_from_time(self):
+        '''Should the participant receive an extra chance because he got an
+        extra chance lying about?
+        '''
+        return (self.last_chance_used_at
+                and self.last_chance_used_at >= self._last_new_period)
+
+    def _last_new_period(self):
+        '''The time `last_chance_used_at` must be prior to receive an extra
+        chance
+        '''
+        return truncate_day(timezone.now())
+
+    def _set_last_chance_used(self):
+        '''If `last_chance_used_at` has never been set then there's no extra
+         chances to be had. The chance already came with the default
+         Participant.
+        '''
+        if(self.chances == 0
+           and (not self.last_chance_used_at or self.extra_chance_from_time)):
+            self.last_chance_used_at = timezone.now()
+
+
+class PrizeBase(models.Model):
     '''A prize is something that a participant can win/receive during a
     contest.  A prize can be unlimited if the total_units available is
     -1, otherwise limited.  When all of a prize has been claimed then
@@ -167,7 +260,6 @@ class Prize(models.Model):
     be claimed.
     '''
     class AllClaimed(IntegrityError): pass
-    class AlreadyClaimed(IntegrityError): pass
 
     RANDOM_MAX_TRY = 6
     '''How many times `get_and_claim_random` will try before it gives
@@ -178,16 +270,9 @@ class Prize(models.Model):
                                           through='TimePeriodPrizeAvailable')
     total_units = models.IntegerField(
         default=3,
-        help_text=_('-1 unlimited. Units per time period')
+        help_text=_('-1 means unlimited. Units available per time period')
     )
     description = models.CharField(max_length=255)
-    slice_no = models.PositiveIntegerField(
-        help_text=_('Corresponding slice in the wheel')
-    )
-    css_class = models.CharField(
-        max_length=15,
-        help_text=_('Used for displaying the image on the claim page')
-    )
 
     def __unicode__(self):
         return self.description
@@ -215,64 +300,72 @@ class Prize(models.Model):
         return self.time_period_won.get(time_period=period).all_claimed
 
     @property
-    def unlimited(self):
+    def is_unlimited(self):
         return self.total_units == -1
 
-    def claim(self, time_period, fan):
-        if self.units_left(time_period):
-            if(not self.unlimited
-               and Claim.objects.filter(prize=self,
-                                        participant=participant).exists()):
-                raise self.AlreadyClaimed(
-                    _('This gift has already been claimed by this user')
-                )
+    def claim(self, time_period, particpant):
+        if self.all_claimed(time_period):
+            pass
+        elif self.units_left(time_period):
+            self._units_left_before_claim_hook(time_period, particpant)
 
-            try:
-                fan.spin()
-            except Participant.NoMoreChances:
-                raise
-            else:
-                return Claim.objects.create(prize=self,
-                                            participant=participant,
-                                            time_period=time_period)
+            participant.use_chance()
+            claim = Claim.objects.create(prize=self,
+                                         participant=participant,
+                                         time_period=time_period)
+            self._after_successfull_claim_hook(claim)
+
+            return claim
         else:
-            # When there are no units left and gift not marked as all claimed
+            # When there are no units left and prize not marked as all claimed
             # see if there's any left that:
             # - hasn't been confirmed
-            # - hasn't expired
+            # - and hasn't expired
             #
-            # If not mark gift as `all_claimed`.
-            if self.all_claimed(time_period):
-                if(self.all_claims
-                   .filter(unclaimed_at__gt=timezone.now,
-                           claim_confirmed=False).count() == 0):
-                    self.time_period_won.all_claimed = True
-                    self.save()
+            # If all has been either confirmed or expired then mark
+            # prize as `all_claimed`.
+            if(self.all_claims
+               .filter(unclaimed_at__gt=timezone.now,
+                       claim_confirmed=False).count() == 0):
+                (self.time_period_claimed
+                 .get(time_period=time_period)
+                 .set_all_claimed())
 
-            raise self.AllClaimed(
-                _('All {0} of this gift has been claimed'.format(
-                    self.total_units
-                )))
+        raise self.AllClaimed(
+            _('All {0} of this gift has been claimed'.format(
+                self.total_units
+            )))
+
+    def _units_left_before_claim_hook(self, time_period, participant):
+        '''Hook to allow adding extra logic if there's any units left.  Should
+        raise an exception if there's any issues with the participant
+        claiming the prize.
+
+        '''
+
+    def _after_successfull_claim_hook(claim):
+        '''After a new claim objects has been created'''
 
     @classmethod
     def get_random(cls, time_period):
-        '''This might not be the best way of doing random, do some
-        benchmarking'''
-        gift = (cls.objects
-                .filter(time_period_won__time_period=time_period,
-                        time_period_won__all_claimed=False)
-                .order_by('?'))
+        '''Receive a random price that still has units left'''
+        # This might not be the best way of doing random, do some
+        # benchmarking
+        prize = (cls.objects
+                 .filter(time_period_claimed__time_period=time_period,
+                         time_period_claimed__all_claimed=False)
+                 .order_by('?'))
 
-        if gift:
-            return gift[0]
+        if prize:
+            return prize[0]
         else:
-            raise cls.AllClaimed(_('All gifts has been claimed'))
+            raise cls.AllClaimed(_('All prizes has been claimed'))
 
     @classmethod
     def get_random_unlimited(cls, time_period):
         prize = (cls.objects
-                 .filter(time_period_won__time_period=time_period,
-                         time_period_won__all_claimed=False,
+                 .filter(time_period_claimed__time_period=time_period,
+                         time_period_claimed__all_claimed=False,
                          total_units=-1)
                  .order_by('?'))
 
@@ -295,6 +388,24 @@ class Prize(models.Model):
 
         gift = cls.get_random_unlimited(time_period)
         return gift, gift.claim(time_period, participant)
+
+
+class PrizeUniqueClaim(PrizeBase):
+    class AlreadyClaimed(IntegrityError): pass
+
+    CanReclaimUnlimited = True
+    '''Can a participant claim an unlimited prize several times?'''
+
+    def _units_left_before_claim_hook(self, time_period, participant):
+        if Claim.objects.filter(prize=self,
+                                participant=participant).exists():
+            if not (self.is_unlimited and self.CanReclaimUnlimited):
+                raise self.AlreadyClaimed(_('This prize has already been '
+                                            'claimed by this participant'))
+
+
+class PrizeConfirmClaim(PrizeBase):
+    pass
 
 
 class Claim(models.Model):
@@ -346,8 +457,14 @@ class Claim(models.Model):
 
 class TimePeriodPrizeAvailable(models.Model):
     time_period = models.ForeignKey(TimePeriod, related_name='+')
-    prize = models.ForeignKey(Prize, related_name='time_period_won')
+    prize = models.ForeignKey(Prize, related_name='time_period_claimed')
     all_claimed = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('time_period', 'prize')
+
+    def set_all_claimed(self, commit=True):
+        self.all_claimed = True
+
+        if commit:
+            self.save()
