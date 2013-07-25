@@ -1,21 +1,38 @@
 # flake8:noqa
-from .time_period import TimePeriod, TimePeriodBase
-from .participa import (
-    Participant,
+from .time_period import TimePeriodBase
+from .participant import (
     ParticipantBase,
     LimitedParticipation,
     ExtraChanceDaily,
 )
 from .prize import (
-    Prize,
     PrizeBase,
     PrizeUniqueClaim,
     PrizeClaimUsesChance,
     PrizeConfirmClaim,
 
-    Claim,
     ClaimBase,
     ClaimNeedsConfirmation,
 
-    TimePeriodPrizeAvailable
+    TimePeriodPrizeAvailableBase
 )
+
+
+class Participant(ParticipantBase):
+    pass
+
+
+class TimePeriod(TimePeriodBase):
+    pass
+
+
+class Prize(PrizeBase):
+    pass
+
+
+class Claim(ClaimBase):
+    pass
+
+
+class TimePeriodPrizeAvailable(TimePeriodPrizeAvailableBase):
+    pass

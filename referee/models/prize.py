@@ -6,11 +6,21 @@ from django.db import IntegrityError, models
 from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
 
-from .participant import Participant
-from .time_period import TimePeriod
+
+class ClaimClassResolution(object):
+    '''To fix object resolution dynamically add a class based off of the
+    current models app label
+    '''
+    _ClaimClass = None
+    @property
+    def ClaimClass(self):
+        if self._ClaimClass is None:
+            self._ClaimClass = models.get_model(self._meta.app_label, 'Claim')
+
+        return self._ClaimClass
 
 
-class PrizeBase(models.Model):
+class PrizeBase(ClaimClassResolution, models.Model):
     '''A prize is something that a participant can win/receive during a
     contest.  A prize can be unlimited if the total_units available is
     -1, otherwise limited.  When all of a prize has been claimed then
@@ -27,7 +37,7 @@ class PrizeBase(models.Model):
     up and returns `get_random_unlimited`
     '''
 
-    time_periods = models.ManyToManyField(TimePeriod, related_name='prizes',
+    time_periods = models.ManyToManyField('TimePeriod', related_name='prizes',
                                           through='TimePeriodPrizeAvailable')
     total_units = models.IntegerField(
         default=3,
@@ -55,13 +65,13 @@ class PrizeBase(models.Model):
     @property
     def claimed(self):
         '''A queryset for all gifts that has been successfully claimed'''
-        return (Claim.objects
+        return (self.ClaimClass.objects
                 .filter(prize=self)
                 .exclude(unclaimed_at__lt=timezone.now(),
                          claim_confirmed=False))
 
     def all_claimed(self, period):
-        return self.time_period_won.get(time_period=period).all_claimed
+        return self.time_period_claimed.get(time_period=period).all_claimed
 
     @property
     def is_unlimited(self):
@@ -86,9 +96,9 @@ class PrizeBase(models.Model):
         # Not happy about the name for this method, any other options?
         # Thinking is that it should function like `form_valid` and
         # `form_invalid` in the normal CBVs...
-        return Claim.objects.create(prize=self,
-                                    participant=participant,
-                                    time_period=time_period)
+        return self.ClaimClass.objects.create(prize=self,
+                                              participant=participant,
+                                              time_period=time_period)
 
     def no_units_left_to_claim(self, time_period, participant):
         '''Bookeeping to run when the prize hasn't been marked as all claimed
@@ -138,8 +148,9 @@ class PrizeBase(models.Model):
                 return prize, prize.claim(time_period, participant)
             except cls.AllClaimed:
                 pass
-            except cls.AlreadyClaimed:
-                pass
+            # TODO Fix this in a nice, not very duplicate way
+            #except cls.AlreadyClaimed:
+            #    pass
 
         gift = cls.get_random_unlimited(time_period)
         return gift, gift.claim(time_period, participant)
@@ -155,8 +166,8 @@ class PrizeUniqueClaim(PrizeBase):
     '''Can a participant claim an unlimited prize several times?'''
 
     def _units_left_before_claim_hook(self, time_period, participant):
-        if Claim.objects.filter(prize=self,
-                                participant=participant).exists():
+        if self.ClaimClass.objects.filter(prize=self,
+                                          participant=participant).exists():
             if not (self.is_unlimited and self.CanReclaimUnlimited):
                 raise self.AlreadyClaimed('This prize has already been '
                                           'claimed by this participant')
@@ -197,14 +208,10 @@ class PrizeConfirmClaim(PrizeBase):
                    .no_units_left_to_claim(time_period, participant))
 
 
-class Prize(PrizeBase):
-    pass
-
-
 class ClaimBase(models.Model):
-    prize = models.ForeignKey(Prize, related_name='all_claims')
-    participant = models.ForeignKey(Participant, related_name='claimed')
-    time_period = models.ForeignKey(TimePeriod, related_name='+')
+    prize = models.ForeignKey('Prize', related_name='all_claims')
+    participant = models.ForeignKey('Participant', related_name='claimed')
+    time_period = models.ForeignKey('TimePeriod', related_name='+')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -253,16 +260,12 @@ class ClaimNeedsConfirmation(ClaimBase):
         return super(ClaimNeedsConfirmation, self).save(*args, **kwargs)
 
 
-class Claim(ClaimBase):
-    pass
-
-
 class TimePeriodPrizeAvailableBase(models.Model):
     '''A ManyToMany through model. Used mainly to keep track of if all
     prizes has been claimed.
     '''
-    time_period = models.ForeignKey(TimePeriod, related_name='+')
-    prize = models.ForeignKey(Prize, related_name='time_period_claimed')
+    time_period = models.ForeignKey('TimePeriod', related_name='+')
+    prize = models.ForeignKey('Prize', related_name='time_period_claimed')
     all_claimed = models.BooleanField(default=False)
 
     class Meta:
@@ -274,7 +277,3 @@ class TimePeriodPrizeAvailableBase(models.Model):
 
         if commit:
             self.save()
-
-
-class TimePeriodPrizeAvailable(TimePeriodPrizeAvailableBase):
-    pass

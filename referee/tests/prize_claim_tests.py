@@ -15,7 +15,7 @@ class PrizeAndClaimTest(TestCase):
         self.period = TimePeriodFactory.create()
         self.prize = PrizeFactory.create(time_periods=self.period,
                                        total_units=self.total_units)
-        self.participant = ParticipantFactory.create(spin_times=100)
+        self.participant = ParticipantFactory.create(chances=100)
         self.participant2 = ParticipantFactory.create()
 
     def test_should_be_as_many_left_as_total_when_no_claimed(self):

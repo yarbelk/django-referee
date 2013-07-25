@@ -27,7 +27,7 @@ class TimePeriodBase(models.Model):
         return self.name
 
     def clean(self, *args, **kwargs):
-        super(TimePeriod, self).clean(*args, **kwargs)
+        super(TimePeriodBase, self).clean(*args, **kwargs)
         cls = self.__class__
 
         if self.period_end <= self.period_start:
@@ -69,7 +69,3 @@ class TimePeriodBase(models.Model):
             current = timezone.now()
 
         return cls.objects.filter(period_start__lt=current)
-
-
-class TimePeriod(TimePeriodBase):
-    pass
