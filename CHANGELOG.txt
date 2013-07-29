@@ -1,3 +1,9 @@
+2013-07-29  Björn Andersson  <ba@sanitarium.se>
+
+	* views.py (TimePeriodMixin): added a mixin for adding a time
+	period to the template context. Defaults to the current active
+	time period or false.
+
 2013-07-23  Björn Andersson  <ba@sanitarium.se>
 
 	* models.py (TimePeriod): added a model for non-overlapping time
