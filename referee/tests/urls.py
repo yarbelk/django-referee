@@ -3,12 +3,10 @@ from django.conf.urls.defaults import patterns, include, url
 from django.contrib import admin
 
 
-from test_app.views import TimePeriodView
-
 admin.autodiscover()
 
 urlpatterns = patterns(
     '',
-    url(r'^timeperiod/$', TimePeriodView.as_view(), name='time-period'),
+    url(r'^test/', include('test_app.urls', namespace='test', app_name='test_app')),
     url(r'^admin/', include(admin.site.urls)),
 )

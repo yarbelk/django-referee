@@ -9,7 +9,7 @@ from test_app.models import TimePeriod
 
 class TimePeriodMixin(TestCase):
     def setUp(self):
-        self.url = reverse('time-period')
+        self.url = reverse('test:time-period')
 
     def test_when_no_time_period_in_db_should_return_false(self):
         res = self.client.get(self.url)

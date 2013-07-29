@@ -1,4 +1,5 @@
 from django.core.exceptions import ImproperlyConfigured
+from django.db.models import get_model
 
 
 class TimePeriodMixin(object):
@@ -6,20 +7,37 @@ class TimePeriodMixin(object):
     or False if no active time period.
 
     Configuration:
-      `model`: The model class that implements TimePeriodBase. Required.
+      `time_period_model`: The model class that implements TimePeriodBase.
       `queryset`: If not set TimePeriod.current is used
+
+    If the app that implements `TimePeriod` is the same as the one the
+    current request is on and that app's urls has `app_name` configured
+    in `urls.py` model can be automatically found.
+    I.e.: url(r'^test/', include('test_app.urls', namespace='test',
+              app_name='test_app')),
 
     Raises:
       ImproperlyConfigured: If no model has been defined
+
     '''
-    model = None
+    time_period_model = None
+    _model = None
     queryset = None
 
     def get_model(self):
-        if self.model is None:
-            raise ImproperlyConfigured('`model` is not set for TimePeriod. ')
+        if self._model: return self._model
 
-        return self.model
+        model = self.time_period_model
+        if model is None:
+            model = get_model(self.request.resolver_match.app_name,
+                              'TimePeriod')
+            if not model:
+                raise ImproperlyConfigured(
+                    '`model` is not set for TimePeriod.'
+                )
+
+        self._model = model
+        return model
 
     def get_queryset(self):
         if self.queryset is None:
