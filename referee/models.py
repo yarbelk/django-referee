@@ -8,7 +8,7 @@ from django.utils.translation import ugettext_lazy as _
 from .managers import CurrentTimePeriodManager, CurrentAndPastTimePeriodManager
 
 
-class TimePeriod(models.Model):
+class TimePeriodBase(models.Model):
     objects = models.Manager()
     current = CurrentTimePeriodManager()
     current_and_past = CurrentAndPastTimePeriodManager()
@@ -18,6 +18,7 @@ class TimePeriod(models.Model):
     period_end = models.DateTimeField(blank=False, null=True)
 
     class Meta:
+        abstract = True
         unique_together = ('period_start', 'period_end',)
         ordering = ('-period_start',)
 
@@ -25,7 +26,7 @@ class TimePeriod(models.Model):
         return self.name
 
     def clean(self, *args, **kwargs):
-        super(TimePeriod, self).clean(*args, **kwargs)
+        super(TimePeriodBase, self).clean(*args, **kwargs)
         cls = self.__class__
 
         if self.period_end <= self.period_start:
@@ -69,3 +70,7 @@ class TimePeriod(models.Model):
             current = timezone.now()
 
         return cls.objects.filter(period_start__lt=current)
+
+
+class TimePeriod(TimePeriodBase):
+    pass

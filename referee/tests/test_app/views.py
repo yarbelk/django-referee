@@ -1,6 +1,6 @@
 from django.views.generic import TemplateView
 
-from referee.models import TimePeriod
+from .models import TimePeriod
 from referee.views import TimePeriodMixin
 
 

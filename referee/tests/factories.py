@@ -3,7 +3,7 @@ from datetime import datetime
 from django.utils import timezone
 import factory
 
-from ..models import TimePeriod
+from test_app.models import TimePeriod
 
 
 class TimePeriodFactory(factory.DjangoModelFactory):

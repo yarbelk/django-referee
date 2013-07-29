@@ -1,5 +1,9 @@
 2013-07-29  Björn Andersson  <ba@sanitarium.se>
 
+	* models.py (TimePeriodBase): rename TimePeriod to TimePeriodBase
+	and implement that as TimePeriod instead. Will be doing all models
+	like this going forward.
+
 	* views.py (TimePeriodMixin): added a mixin for adding a time
 	period to the template context. Defaults to the current active
 	time period or false.

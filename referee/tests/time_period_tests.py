@@ -8,7 +8,7 @@ from django.utils import timezone
 from mock import Mock, patch
 
 from .factories import TimePeriodFactory
-from ..models import TimePeriod
+from test_app.models import TimePeriod
 
 
 class TimePeriodTest(TestCase):

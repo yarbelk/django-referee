@@ -4,7 +4,7 @@ from django.core.urlresolvers import reverse
 from django.test import TestCase
 from django.utils import timezone
 
-from referee.models import TimePeriod
+from test_app.models import TimePeriod
 
 
 class TimePeriodMixin(TestCase):
