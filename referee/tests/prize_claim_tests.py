@@ -6,7 +6,7 @@ from django.utils import timezone
 from mock import patch
 
 from .factories import TimePeriodFactory, ParticipantFactory, PrizeFactory
-from ..models import Participant, Prize, TimePeriodPrizeAvailable, Claim
+from test_app.models import Participant, Prize, TimePeriodPrizeAvailable, Claim
 
 
 class PrizeAndClaimTest(TestCase):

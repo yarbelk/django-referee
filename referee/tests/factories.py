@@ -5,7 +5,8 @@ from django.utils import timezone
 import factory
 from django_libs.tests.factories import UserFactory
 
-from ..models import TimePeriod, Participant, TimePeriodPrizeAvailable, Prize
+from test_app.models import (Participant, Prize, TimePeriod,
+                             TimePeriodPrizeAvailable)
 
 
 class TimePeriodFactory(factory.DjangoModelFactory):
