@@ -8,47 +8,49 @@ class TimePeriodMixin(object):
 
     Configuration:
       `time_period_model`: The model class that implements TimePeriodBase.
-      `queryset`: If not set TimePeriod.current is used
+      `time_period_queryset`: If not set TimePeriod.current is used
 
-    If the app that implements `TimePeriod` is the same as the one the
-    current request is on and that app's urls has `app_name` configured
-    in `urls.py` model can be automatically found.
-    I.e.: url(r'^test/', include('test_app.urls', namespace='test',
-              app_name='test_app')),
+    In Django 1.5 and above:
+      If the app that implements `TimePeriod` is the same as the one the
+      current request is on and that app's urls has `app_name` configured
+      in `urls.py` model can be automatically found.
+      I.e.: url(r'^test/', include('test_app.urls', namespace='test',
+                app_name='test_app')),
 
     Raises:
       ImproperlyConfigured: If no model has been defined
 
     '''
-    time_period_model = None
     _model = None
-    queryset = None
+    time_period_model = None
+    time_period_queryset = None
 
-    def get_model(self):
+    def get_time_period_model(self):
         if self._model: return self._model
 
         model = self.time_period_model
         if model is None:
-            model = get_model(self.request.resolver_match.app_name,
-                              'TimePeriod')
+            if hasattr(self.request, 'resolver_match'):
+                model = get_model(self.request.resolver_match.app_name,
+                                  'TimePeriod')
             if not model:
                 raise ImproperlyConfigured(
-                    '`model` is not set for TimePeriod.'
+                    '`time_period_model` is not set for TimePeriod.'
                 )
 
         self._model = model
         return model
 
-    def get_queryset(self):
-        if self.queryset is None:
-            model = self.get_model()
+    def get_time_period_queryset(self):
+        if self.time_period_queryset is None:
+            model = self.get_time_period_model()
             return model.current
         else:
-            return self.queryset
+            return self.time_period_queryset
 
     def get_time_period(self):
-        model = self.get_model()
-        queryset = self.get_queryset()
+        model = self.get_time_period_model()
+        queryset = self.get_time_period_queryset()
 
         try:
             return queryset.get()
